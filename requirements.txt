@@ -2,3 +2,5 @@ openpyxl>=3.1.2
 holidays>=0.57
 # Optional for PDF export
 reportlab>=4.2.0
+# Optional for selector de fecha (GUI mejorada)
+tkcalendar>=1.6.1

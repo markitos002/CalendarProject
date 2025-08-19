@@ -9,6 +9,13 @@ try:
 except Exception:
     tk = None  # type: ignore
 
+# Optional date picker (nice UX if available)
+try:
+    from tkcalendar import DateEntry  # type: ignore
+    TKCAL_OK = True
+except Exception:
+    TKCAL_OK = False
+
 # Excel
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
@@ -250,11 +257,11 @@ class CalendarGUI:
     def __init__(self, root: tk.Tk, start: date = date(2025, 8, 18), weeks: int = 18) -> None:  # type: ignore[name-defined]
         self.root = root
         self.root.title("Generador de Calendario de Clases")
-        self.start = start
-        self.weeks = weeks
-        self.week_dates = compute_weeks(start, weeks)
-        self.end = self.week_dates[-1].miercoles
-        self.holidays = get_colombia_holidays(self.start, self.end)
+    self.start = start
+    self.weeks = weeks
+    self.week_dates = compute_weeks(start, weeks)
+    self.end = self.week_dates[-1].miercoles
+    self.holidays = get_colombia_holidays(self.start, self.end)
 
         # Top fields
         top = ttk.Frame(root)
@@ -268,6 +275,29 @@ class CalendarGUI:
         self.var_sub = tk.StringVar(value=f"Desde {self.start.strftime('%d/%m/%Y')} por {self.weeks} semanas")
         ttk.Entry(top, width=60, textvariable=self.var_sub).grid(row=1, column=1, sticky=tk.W)
 
+        # Controls: start date + weeks + update
+        controls = ttk.Frame(root)
+        controls.pack(fill=tk.X, padx=10, pady=(0, 6))
+        ttk.Label(controls, text="Fecha de inicio (debe ser Lunes):").grid(row=0, column=0, sticky=tk.W)
+
+        if TKCAL_OK:
+            self.date_widget = DateEntry(controls, date_pattern='dd/mm/yyyy')
+            self.date_widget.set_date(self.start)
+            self.date_widget.grid(row=0, column=1, padx=(6, 12))
+        else:
+            # Fallback: comboboxes for day/month/year
+            self._var_day = tk.StringVar(value=str(self.start.day))
+            self._var_month = tk.StringVar(value=str(self.start.month))
+            self._var_year = tk.StringVar(value=str(self.start.year))
+            ttk.Combobox(controls, width=3, values=[f"{i:02d}" for i in range(1, 32)], textvariable=self._var_day, state="readonly").grid(row=0, column=1, padx=3)
+            ttk.Combobox(controls, width=3, values=[f"{i:02d}" for i in range(1, 13)], textvariable=self._var_month, state="readonly").grid(row=0, column=2, padx=3)
+            ttk.Combobox(controls, width=5, values=[str(y) for y in range(self.start.year-2, self.start.year+3)], textvariable=self._var_year, state="readonly").grid(row=0, column=3, padx=(3, 12))
+
+        ttk.Label(controls, text="Semanas:").grid(row=0, column=4, sticky=tk.W)
+        self.var_weeks = tk.StringVar(value=str(self.weeks))
+        ttk.Spinbox(controls, from_=1, to=30, width=4, textvariable=self.var_weeks).grid(row=0, column=5, padx=(6, 12))
+        ttk.Button(controls, text="Actualizar calendario", command=self.rebuild_calendar).grid(row=0, column=6)
+
         # Scrollable frame for weeks
         container = ttk.Frame(root)
         container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -280,8 +310,65 @@ class CalendarGUI:
         canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+    scrollbar.pack(side="right", fill="y")
 
+    # Build weeks UI initially
+    self._build_weeks_ui()
+
+        # Action buttons
+        actions = ttk.Frame(root)
+        actions.pack(fill=tk.X, padx=10, pady=(0, 12))
+        ttk.Button(actions, text="Exportar a Excel (.xlsx)", command=self.export_excel).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Exportar a PDF (.pdf)", command=self.export_pdf).pack(side=tk.LEFT, padx=10)
+
+        # Holidays notice
+        self.info_label = ttk.Label(root, text=self._holidays_text())
+        self.info_label.pack(padx=10, pady=(0, 10))
+
+    def _holidays_text(self) -> str:
+        if not self.holidays:
+            return "Festivos detectados: ninguno en el rango"
+        return f"Festivos detectados: {', '.join(d.strftime('%d/%m') for d in sorted(self.holidays.keys()))}"
+
+    def _get_selected_start_date(self) -> date:
+        if TKCAL_OK:
+            d = self.date_widget.get_date()
+            # tkcalendar returns datetime.date
+            return date(d.year, d.month, d.day)
+        # Fallback from comboboxes
+        y = int(self._var_year.get())
+        m = int(self._var_month.get())
+        d = int(self._var_day.get())
+        return date(y, m, d)
+
+    def rebuild_calendar(self) -> None:
+        try:
+            start = self._get_selected_start_date()
+        except Exception as e:
+            messagebox.showerror("Fecha inválida", f"No se pudo leer la fecha: {e}")
+            return
+        try:
+            weeks = int(self.var_weeks.get())
+        except Exception:
+            weeks = 18
+
+        if start.weekday() != 0:
+            messagebox.showerror("Inicio inválido", "La fecha de inicio debe ser un Lunes.")
+            return
+
+        self.start = start
+        self.weeks = weeks
+        self.week_dates = compute_weeks(self.start, self.weeks)
+        self.end = self.week_dates[-1].miercoles
+        self.holidays = get_colombia_holidays(self.start, self.end)
+
+        # Rebuild scroll area
+        for child in self.scroll_frame.winfo_children():
+            child.destroy()
+        self._build_weeks_ui()
+        self.info_label.config(text=self._holidays_text())
+
+    def _build_weeks_ui(self) -> None:
         # Headers
         header = ttk.Frame(self.scroll_frame)
         header.grid(row=0, column=0, sticky=tk.W)
@@ -291,8 +378,7 @@ class CalendarGUI:
         ttk.Label(header, text="Miércoles (Sesión 1)", width=28).grid(row=0, column=3)
         ttk.Label(header, text="Miércoles (Sesión 2)", width=28).grid(row=0, column=4)
 
-        # Store widgets for each semana; avoid direct tk.Text type hints for compatibility
-        self.inputs: Dict[int, Tuple[Any, Any, Any, Any]] = {}
+        self.inputs = {}
 
         for i, wd in enumerate(self.week_dates, start=1):
             row_idx = i
@@ -310,7 +396,8 @@ class CalendarGUI:
                 t = tk.Text(parent, width=28, height=3, wrap="word")
                 t.grid(row=0, column=col, padx=3)
                 if is_holiday:
-                    t.insert("1.0", f"Festivo: {self.holidays[day]}\nNo hay clase")
+                    name = self.holidays.get(day, "Festivo")
+                    t.insert("1.0", f"Festivo: {name}\nNo hay clase")
                     t.config(state=tk.DISABLED)
                 return t
 
@@ -319,16 +406,6 @@ class CalendarGUI:
             txt_w1 = mk_text(frm, 3, wd.miercoles, holiday_wed)
             txt_w2 = mk_text(frm, 4, wd.miercoles, holiday_wed)
             self.inputs[wd.semana] = (txt_mon, txt_tue, txt_w1, txt_w2)
-
-        # Action buttons
-        actions = ttk.Frame(root)
-        actions.pack(fill=tk.X, padx=10, pady=(0, 12))
-        ttk.Button(actions, text="Exportar a Excel (.xlsx)", command=self.export_excel).pack(side=tk.LEFT)
-        ttk.Button(actions, text="Exportar a PDF (.pdf)", command=self.export_pdf).pack(side=tk.LEFT, padx=10)
-
-        # Holidays notice
-        info = ttk.Label(root, text=f"Festivos detectados: {', '.join(d.strftime('%d/%m') for d in sorted(self.holidays.keys()))}")
-        info.pack(padx=10, pady=(0, 10))
 
     def _collect_entries(self) -> Dict[int, Tuple[str, str, str, str]]:
         out: Dict[int, Tuple[str, str, str, str]] = {}

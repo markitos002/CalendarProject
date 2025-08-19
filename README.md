@@ -18,7 +18,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-`reportlab` es opcional; sin ella sólo Excel estará disponible.
+`reportlab` es opcional; sin ella sólo Excel estará disponible. Para el selector de fecha con calendario instala también `tkcalendar` (si no, se usan combos de día/mes/año).
 
 ## Ejecutar
 
