@@ -100,6 +100,14 @@ SPANISH_MONTHS = {
     7: "Julio", 8: "Agosto", 9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
 }
 
+# Horarios fijos por día/sesión
+CLASS_TIMES = {
+    "lunes": "2:00 pm - 4:00 pm",
+    "martes": "8:00 am - 10:00 am",
+    "miercoles_1": "6:00 am - 8:00 am",
+    "miercoles_2": "2:00 pm - 5:00 pm",
+}
+
 
 @dataclass
 class WeekDates:
@@ -190,10 +198,10 @@ def build_excel(
 
         # Day headers
         headers = [
-            f"Lunes {wd.lunes.strftime('%d/%m')}",
-            f"Martes {wd.martes.strftime('%d/%m')}",
-            f"Miércoles 1 {wd.miercoles.strftime('%d/%m')}",
-            f"Miércoles 2 {wd.miercoles.strftime('%d/%m')}",
+            f"Lunes {CLASS_TIMES['lunes']} {wd.lunes.strftime('%d/%m')}",
+            f"Martes {CLASS_TIMES['martes']} {wd.martes.strftime('%d/%m')}",
+            f"Miércoles 1 {CLASS_TIMES['miercoles_1']} {wd.miercoles.strftime('%d/%m')}",
+            f"Miércoles 2 {CLASS_TIMES['miercoles_2']} {wd.miercoles.strftime('%d/%m')}",
         ]
         for col, h in enumerate(headers, start=1):
             c = ws.cell(row=row, column=col, value=h)
@@ -263,10 +271,10 @@ def build_pdf(
 
         data = [
             [
-                f"Lunes {wd.lunes.strftime('%d/%m')}",
-                f"Martes {wd.martes.strftime('%d/%m')}",
-                f"Miércoles 1 {wd.miercoles.strftime('%d/%m')}",
-                f"Miércoles 2 {wd.miercoles.strftime('%d/%m')}",
+                f"Lunes {CLASS_TIMES['lunes']} {wd.lunes.strftime('%d/%m')}",
+                f"Martes {CLASS_TIMES['martes']} {wd.martes.strftime('%d/%m')}",
+                f"Miércoles 1 {CLASS_TIMES['miercoles_1']} {wd.miercoles.strftime('%d/%m')}",
+                f"Miércoles 2 {CLASS_TIMES['miercoles_2']} {wd.miercoles.strftime('%d/%m')}",
             ]
         ]
 
@@ -525,10 +533,10 @@ class CalendarGUI:
 
         # Headers directly in scroll_frame
         ttk.Label(self.scroll_frame, text="Semana", width=16).grid(row=0, column=0, sticky=tk.W)
-        ttk.Label(self.scroll_frame, text="Lunes", width=28).grid(row=0, column=1, sticky=tk.W)
-        ttk.Label(self.scroll_frame, text="Martes", width=28).grid(row=0, column=2, sticky=tk.W)
-        ttk.Label(self.scroll_frame, text="Miércoles (Sesión 1)", width=28).grid(row=0, column=3, sticky=tk.W)
-        ttk.Label(self.scroll_frame, text="Miércoles (Sesión 2)", width=28).grid(row=0, column=4, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text=f"Lunes ({CLASS_TIMES['lunes']})", width=28).grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text=f"Martes ({CLASS_TIMES['martes']})", width=28).grid(row=0, column=2, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text=f"Miércoles (Sesión 1: {CLASS_TIMES['miercoles_1']})", width=28).grid(row=0, column=3, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text=f"Miércoles (Sesión 2: {CLASS_TIMES['miercoles_2']})", width=28).grid(row=0, column=4, sticky=tk.W)
 
         # Mapa semana -> (Text lunes, Text martes, Text mié1, Text mié2)
         self.inputs = {}
