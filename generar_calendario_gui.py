@@ -25,6 +25,8 @@ Notas de mantenimiento
 """
 
 import sys
+import os
+import json
 from datetime import date, timedelta
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Set
@@ -423,6 +425,15 @@ class CalendarGUI:
         self.info_label = ttk.Label(root, text=self._holidays_text())
         self.info_label.pack(padx=10, pady=(0, 10))
 
+        # Hook close event to save backup
+        try:
+            self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        except Exception:
+            pass
+
+        # Load previous backup and apply
+        self._load_backup()
+
     def _get_exam_dates(self) -> Set[date]:
         """Lee y valida las 8 fechas de exámenes del UI; ignora vacíos."""
         out: Set[date] = set()
@@ -495,6 +506,10 @@ class CalendarGUI:
             child.destroy()
         self._build_weeks_ui()
         self.info_label.config(text=self._holidays_text())
+        # After rebuilding, re-apply saved entries if any
+        saved = self._read_backup_file()
+        if saved and isinstance(saved.get("entries"), dict):
+            self._apply_saved_entries(saved["entries"])
 
     def _build_weeks_ui(self) -> None:
         """Construye la grilla de semanas sobre un único grid.
@@ -572,6 +587,7 @@ class CalendarGUI:
         try:
             exams = self._get_exam_dates()
             build_excel(path, title, subtitle, self.week_dates, self._collect_entries(), self.holidays, exams)
+            self._save_backup()
             messagebox.showinfo("Listo", f"Archivo Excel generado:\n{path}")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo generar el Excel.\n{e}")
@@ -590,9 +606,114 @@ class CalendarGUI:
         try:
             exams = self._get_exam_dates()
             build_pdf(path, title, subtitle, self.week_dates, self._collect_entries(), self.holidays, exams)
+            self._save_backup()
             messagebox.showinfo("Listo", f"Archivo PDF generado:\n{path}")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo generar el PDF.\n{e}")
+
+    # ---------- Backup persistence ----------
+    def _backup_path(self) -> str:
+        return os.path.join(os.path.dirname(__file__), "calendario_backup.json")
+
+    def _read_backup_file(self) -> Optional[Dict[str, Any]]:
+        try:
+            path = self._backup_path()
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            return None
+        return None
+
+    def _save_backup(self) -> None:
+        try:
+            data: Dict[str, Any] = {}
+            data["title"] = self.var_title.get().strip()
+            data["subtitle"] = self.var_sub.get().strip()
+            s = self._get_selected_start_date()
+            data["start_date"] = s.isoformat()
+            data["weeks"] = int(self.var_weeks.get()) if str(self.var_weeks.get()).isdigit() else self.weeks
+            exams = sorted(self._get_exam_dates())
+            data["exam_dates"] = [d.isoformat() for d in exams]
+            entries = self._collect_entries()
+            data["entries"] = {str(k): list(v) for k, v in entries.items()}
+            with open(self._backup_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _apply_saved_entries(self, saved: Dict[str, List[str]]) -> None:
+        for semana, texts in saved.items():
+            try:
+                sem = int(semana)
+            except Exception:
+                continue
+            if sem not in self.inputs:
+                continue
+            widgets = self.inputs[sem]
+            for idx, txt in enumerate(texts[:4]):
+                if not txt:
+                    continue
+                t = widgets[idx]
+                if str(t["state"]) == "disabled":
+                    continue
+                cur = t.get("1.0", "end").strip()
+                if cur.startswith("Examen"):
+                    t.insert("end", ("\n" if txt else "") + txt)
+                else:
+                    t.delete("1.0", "end")
+                    t.insert("1.0", txt)
+
+    def _load_backup(self) -> None:
+        data = self._read_backup_file()
+        if not data:
+            return
+        if isinstance(data.get("title"), str):
+            self.var_title.set(data["title"])
+        if isinstance(data.get("subtitle"), str):
+            self.var_sub.set(data["subtitle"])
+        try:
+            if isinstance(data.get("start_date"), str):
+                d = date.fromisoformat(data["start_date"])
+                if TKCAL_OK:
+                    self.date_widget.set_date(d)
+                else:
+                    self._var_day.set(f"{d.day:02d}")
+                    self._var_month.set(f"{d.month:02d}")
+                    self._var_year.set(str(d.year))
+        except Exception:
+            pass
+        if isinstance(data.get("weeks"), int):
+            self.var_weeks.set(str(data["weeks"]))
+        ex: List[date] = []
+        if isinstance(data.get("exam_dates"), list):
+            for s in data["exam_dates"]:
+                try:
+                    ex.append(date.fromisoformat(s))
+                except Exception:
+                    pass
+        for i, d in enumerate(ex[:len(self.exam_inputs)]):
+            w = self.exam_inputs[i]
+            try:
+                if TKCAL_OK and hasattr(w, 'set_date'):
+                    w.set_date(d)
+                else:
+                    w.delete(0, "end")
+                    w.insert(0, d.strftime("%d/%m/%Y"))
+            except Exception:
+                continue
+        # Rebuild now that inputs may have changed
+        self.rebuild_calendar()
+        entries = data.get("entries")
+        if isinstance(entries, dict):
+            self._apply_saved_entries(entries)
+
+    def _on_close(self) -> None:
+        self._save_backup()
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
 
 def run_gui() -> int:
