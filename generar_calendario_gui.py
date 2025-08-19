@@ -1,7 +1,33 @@
+"""
+Generador de calendario de clases (GUI)
+
+Resumen de arquitectura
+- Capa de datos:
+    - WeekDates: estructura con las fechas de cada semana (Lun/Mar/Mié) y el número de semana.
+    - compute_weeks(): calcula 18 semanas (o N) a partir de un lunes de inicio.
+    - get_colombia_holidays(): obtiene festivos en Colombia para el rango [inicio, fin]; usa la
+        librería "holidays" si está disponible, o un fallback mínimo para 2025.
+
+- Capa de exportación:
+    - build_excel(): genera un archivo .xlsx con una tabla por semana (encabezado + 4 columnas).
+    - build_pdf(): genera un PDF con tablas por semana (opcional; requiere reportlab).
+
+- Capa de presentación (GUI):
+    - CalendarGUI (Tkinter): ofrece controles para título/subtítulo, fecha de inicio (con tkcalendar
+        si está instalado) y número de semanas; muestra una grilla editable por semana y exporta a Excel/PDF.
+
+Notas de mantenimiento
+- Si en el futuro se agregan más días (p. ej. Jueves/Viernes), modifica:
+    1) WeekDates (añadir campos o cambiar el diseño).
+    2) _build_weeks_ui() para crear columnas y textos.
+    3) build_excel()/build_pdf() para reflejar las nuevas columnas.
+    4) _collect_entries() para devolver los nuevos textos.
+"""
+
 import sys
 from datetime import date, timedelta
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 try:
     import tkinter as tk
@@ -82,6 +108,15 @@ class WeekDates:
 
 
 def compute_weeks(start_monday: date, weeks: int = 18) -> List[WeekDates]:
+    """Calcula un arreglo de WeekDates a partir de un lunes de inicio.
+
+    Parámetros
+    - start_monday: fecha que debe ser lunes (weekday()==0).
+    - weeks: cantidad de semanas a generar.
+
+    Retorna
+    - Lista de WeekDates con (semana, lunes, martes, miércoles) por cada semana.
+    """
     if start_monday.weekday() != 0:
         raise ValueError("La fecha de inicio debe ser un lunes")
     out: List[WeekDates] = []
@@ -98,7 +133,20 @@ def build_excel(
     week_dates: List[WeekDates],
     entries: Dict[int, Tuple[str, str, str, str]],
     holidays_map: Dict[date, str],
+    exam_dates: Set[date],
 ) -> None:
+    """Crea un archivo Excel con el calendario.
+
+        Estructura de salida
+        - Título y subtítulo en las filas 1 y 2 (celdas combinadas).
+        - Por cada semana: una fila de encabezado "SEMANA X MES" y debajo la fila con 4 columnas
+            (Lunes, Martes, Miércoles1, Miércoles2). Si un día es festivo, se rellena la celda y se
+            escribe "No hay clase".
+        - Deja una fila en blanco entre semanas para mejorar la legibilidad.
+
+        Notas
+        - Usa estilos simples (bordes finos, rellenos y alineaciones) para facilitar cambios futuros.
+        """
     wb = Workbook()
     ws = wb.active
     ws.title = "Calendario"
@@ -111,8 +159,9 @@ def build_excel(
     border = Border(top=thin, left=thin, right=thin, bottom=thin)
     align_center = Alignment(horizontal="center", vertical="center")
     align_wrap = Alignment(wrap_text=True, vertical="top")
-    holiday_fill = PatternFill("solid", fgColor="F2F2F2")
-    session_fill = PatternFill("solid", fgColor="E2F0D9")
+    # Colors: holidays light green, exams light orange
+    holiday_fill = PatternFill("solid", fgColor="C6EFCE")
+    exam_fill = PatternFill("solid", fgColor="F8CBAD")
 
     # Title
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=6)
@@ -168,10 +217,12 @@ def build_excel(
             if is_holiday:
                 cell.value = f"Festivo: {holidays_map[d]}\nNo hay clase"
                 cell.fill = holiday_fill
+            elif d in exam_dates:
+                # Mark exams with yellow fill and optional text
+                cell.value = f"Examen" + (f"\n{txt}" if txt else "")
+                cell.fill = exam_fill
             else:
                 cell.value = txt
-                if txt:
-                    cell.fill = session_fill
             cell.alignment = align_wrap
             cell.border = border
         row += 2  # leave a blank row between weeks
@@ -186,7 +237,14 @@ def build_pdf(
     week_dates: List[WeekDates],
     entries: Dict[int, Tuple[str, str, str, str]],
     holidays_map: Dict[date, str],
+    exam_dates: Set[date],
 ) -> None:
+    """Crea un PDF con el calendario por tablas (opcional).
+
+    - Cada semana se imprime como una tabla de 2 filas: encabezados (días) y contenidos.
+    - Sombrea las celdas de días festivos para diferenciarlas.
+    - Requiere la librería reportlab. Si no está, se lanza un RuntimeError controlado.
+    """
     if not REPORTLAB_OK:
         raise RuntimeError("ReportLab no está instalado. Instálalo para exportar a PDF.")
 
@@ -215,6 +273,8 @@ def build_pdf(
         def cell_text(d: date, txt: str) -> str:
             if d in holidays_map:
                 return f"Festivo: {holidays_map[d]}\nNo hay clase"
+            if d in exam_dates:
+                return "Examen" + (f"\n{txt}" if txt else "")
             return txt
 
         data.append([
@@ -236,7 +296,7 @@ def build_pdf(
                 ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ])
         )
-        # Shade holiday cells
+        # Shade holiday/exam cells
         holidays_cols = []
         if wd.lunes in holidays_map:
             holidays_cols.append(0)
@@ -245,7 +305,19 @@ def build_pdf(
         if wd.miercoles in holidays_map:
             holidays_cols.extend([2, 3])
         for c in holidays_cols:
-            t.setStyle(TableStyle([("BACKGROUND", (c, 1), (c, 1), colors.whitesmoke)]))
+            # Light green for holidays
+            t.setStyle(TableStyle([("BACKGROUND", (c, 1), (c, 1), colors.HexColor('#C6EFCE'))]))
+
+        exam_cols = []
+        if wd.lunes in exam_dates:
+            exam_cols.append(0)
+        if wd.martes in exam_dates:
+            exam_cols.append(1)
+        if wd.miercoles in exam_dates:
+            exam_cols.extend([2, 3])
+        for c in exam_cols:
+            # Light orange for exams
+            t.setStyle(TableStyle([("BACKGROUND", (c, 1), (c, 1), colors.HexColor('#F8CBAD'))]))
 
         parts.append(t)
         parts.append(Spacer(1, 6))
@@ -254,14 +326,22 @@ def build_pdf(
 
 
 class CalendarGUI:
+    """Ventana principal de la aplicación.
+
+    Responsabilidades
+    - Proveer controles de entrada (título, subtítulo, fecha de inicio, semanas).
+    - Renderizar la grilla editable por semana con 4 columnas (Lu, Ma, Mié1, Mié2).
+    - Deshabilitar celdas de días festivos con el mensaje "No hay clase".
+    - Exportar a Excel/PDF con los datos ingresados.
+    """
     def __init__(self, root: tk.Tk, start: date = date(2025, 8, 18), weeks: int = 18) -> None:  # type: ignore[name-defined]
         self.root = root
         self.root.title("Generador de Calendario de Clases")
-    self.start = start
-    self.weeks = weeks
-    self.week_dates = compute_weeks(start, weeks)
-    self.end = self.week_dates[-1].miercoles
-    self.holidays = get_colombia_holidays(self.start, self.end)
+        self.start = start
+        self.weeks = weeks
+        self.week_dates = compute_weeks(start, weeks)
+        self.end = self.week_dates[-1].miercoles
+        self.holidays = get_colombia_holidays(self.start, self.end)
 
         # Top fields
         top = ttk.Frame(root)
@@ -298,7 +378,25 @@ class CalendarGUI:
         ttk.Spinbox(controls, from_=1, to=30, width=4, textvariable=self.var_weeks).grid(row=0, column=5, padx=(6, 12))
         ttk.Button(controls, text="Actualizar calendario", command=self.rebuild_calendar).grid(row=0, column=6)
 
-        # Scrollable frame for weeks
+        # Exams input (8 dates)
+        exams_frame = ttk.LabelFrame(root, text="Fechas de exámenes (8)")
+        exams_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
+        self.exam_inputs: List[Any] = []
+        if TKCAL_OK:
+            for i in range(8):
+                ttk.Label(exams_frame, text=f"Examen {i+1}:").grid(row=i//4, column=(i%4)*2, sticky=tk.W, padx=(6 if i%4 else 10, 4), pady=2)
+                de = DateEntry(exams_frame, date_pattern='dd/mm/yyyy')
+                de.grid(row=i//4, column=(i%4)*2 + 1, padx=(0, 12), pady=2)
+                self.exam_inputs.append(de)
+        else:
+            # Fallback: 8 Entry fields dd/mm/yyyy
+            for i in range(8):
+                ttk.Label(exams_frame, text=f"Examen {i+1} (dd/mm/yyyy):").grid(row=i//4, column=(i%4)*2, sticky=tk.W, padx=(6 if i%4 else 10, 4), pady=2)
+                ent = ttk.Entry(exams_frame, width=12)
+                ent.grid(row=i//4, column=(i%4)*2 + 1, padx=(0, 12), pady=2)
+                self.exam_inputs.append(ent)
+
+        # Contenedor con Canvas + Scrollbar para poder desplazar 18 filas cómodamente
         container = ttk.Frame(root)
         container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         canvas = tk.Canvas(container, height=480)
@@ -310,10 +408,10 @@ class CalendarGUI:
         canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+        scrollbar.pack(side="right", fill="y")
 
-    # Build weeks UI initially
-    self._build_weeks_ui()
+        # Build weeks UI initially
+        self._build_weeks_ui()
 
         # Action buttons
         actions = ttk.Frame(root)
@@ -325,12 +423,34 @@ class CalendarGUI:
         self.info_label = ttk.Label(root, text=self._holidays_text())
         self.info_label.pack(padx=10, pady=(0, 10))
 
+    def _get_exam_dates(self) -> Set[date]:
+        """Lee y valida las 8 fechas de exámenes del UI; ignora vacíos."""
+        out: Set[date] = set()
+        for widget in self.exam_inputs:
+            try:
+                if TKCAL_OK and hasattr(widget, 'get_date'):
+                    d = widget.get_date()
+                    out.add(date(d.year, d.month, d.day))
+                else:
+                    txt = widget.get().strip()
+                    if not txt:
+                        continue
+                    # Parse dd/mm/yyyy
+                    dd, mm, yyyy = txt.split('/')
+                    out.add(date(int(yyyy), int(mm), int(dd)))
+            except Exception:
+                # Ignore malformed entries
+                continue
+        return out
+
     def _holidays_text(self) -> str:
+        """Construye el texto de resumen de festivos actual."""
         if not self.holidays:
             return "Festivos detectados: ninguno en el rango"
         return f"Festivos detectados: {', '.join(d.strftime('%d/%m') for d in sorted(self.holidays.keys()))}"
 
     def _get_selected_start_date(self) -> date:
+        """Lee la fecha desde tkcalendar o desde los Combobox de fallback."""
         if TKCAL_OK:
             d = self.date_widget.get_date()
             # tkcalendar returns datetime.date
@@ -342,6 +462,14 @@ class CalendarGUI:
         return date(y, m, d)
 
     def rebuild_calendar(self) -> None:
+        """Recalcula semanas y festivos cuando cambia inicio/semanas.
+
+        Pasos:
+        1) Leer fecha y número de semanas.
+        2) Validar que el inicio sea lunes.
+        3) Recalcular self.week_dates y self.holidays.
+        4) Destruir la grilla anterior y volver a construirla.
+        """
         try:
             start = self._get_selected_start_date()
         except Exception as e:
@@ -369,45 +497,57 @@ class CalendarGUI:
         self.info_label.config(text=self._holidays_text())
 
     def _build_weeks_ui(self) -> None:
-        # Headers
-        header = ttk.Frame(self.scroll_frame)
-        header.grid(row=0, column=0, sticky=tk.W)
-        ttk.Label(header, text="Semana", width=8).grid(row=0, column=0)
-        ttk.Label(header, text="Lunes", width=28).grid(row=0, column=1)
-        ttk.Label(header, text="Martes", width=28).grid(row=0, column=2)
-        ttk.Label(header, text="Miércoles (Sesión 1)", width=28).grid(row=0, column=3)
-        ttk.Label(header, text="Miércoles (Sesión 2)", width=28).grid(row=0, column=4)
+        """Construye la grilla de semanas sobre un único grid.
 
+        Diseño:
+        - Fila 0: Encabezados (Semana, Lunes, Martes, Mié1, Mié2) colocados en ``self.scroll_frame``.
+        - Filas 1..N: Por cada semana, una etiqueta con el rango y 4 widgets de texto.
+        - Importante: se utiliza el mismo contenedor y las mismas columnas para mantener
+          alineados encabezados y contenido (evita desfases).
+        """
+        for c in range(5):
+            self.scroll_frame.grid_columnconfigure(c, weight=0)
+
+        # Headers directly in scroll_frame
+        ttk.Label(self.scroll_frame, text="Semana", width=16).grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text="Lunes", width=28).grid(row=0, column=1, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text="Martes", width=28).grid(row=0, column=2, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text="Miércoles (Sesión 1)", width=28).grid(row=0, column=3, sticky=tk.W)
+        ttk.Label(self.scroll_frame, text="Miércoles (Sesión 2)", width=28).grid(row=0, column=4, sticky=tk.W)
+
+        # Mapa semana -> (Text lunes, Text martes, Text mié1, Text mié2)
         self.inputs = {}
 
+        exams = self._get_exam_dates()
         for i, wd in enumerate(self.week_dates, start=1):
             row_idx = i
-            frm = ttk.Frame(self.scroll_frame)
-            frm.grid(row=row_idx, column=0, sticky=tk.W, pady=2)
 
             holiday_mon = wd.lunes in self.holidays
             holiday_tue = wd.martes in self.holidays
             holiday_wed = wd.miercoles in self.holidays
 
             semana_lbl = f"{wd.semana} ({wd.lunes.strftime('%d/%m')} - {wd.miercoles.strftime('%d/%m')})"
-            ttk.Label(frm, text=semana_lbl, width=12).grid(row=0, column=0, padx=(0, 6))
+            ttk.Label(self.scroll_frame, text=semana_lbl, width=16).grid(row=row_idx, column=0, padx=(0, 6), sticky=tk.W)
 
-            def mk_text(parent, col, day: date, is_holiday: bool) -> Any:
-                t = tk.Text(parent, width=28, height=3, wrap="word")
-                t.grid(row=0, column=col, padx=3)
+            def mk_text(col, day: date, is_holiday: bool) -> Any:
+                t = tk.Text(self.scroll_frame, width=28, height=3, wrap="word")
+                t.grid(row=row_idx, column=col, padx=3, sticky=tk.W)
                 if is_holiday:
                     name = self.holidays.get(day, "Festivo")
                     t.insert("1.0", f"Festivo: {name}\nNo hay clase")
                     t.config(state=tk.DISABLED)
+                elif day in exams:
+                    t.insert("1.0", "Examen")
                 return t
 
-            txt_mon = mk_text(frm, 1, wd.lunes, holiday_mon)
-            txt_tue = mk_text(frm, 2, wd.martes, holiday_tue)
-            txt_w1 = mk_text(frm, 3, wd.miercoles, holiday_wed)
-            txt_w2 = mk_text(frm, 4, wd.miercoles, holiday_wed)
+            txt_mon = mk_text(1, wd.lunes, holiday_mon)
+            txt_tue = mk_text(2, wd.martes, holiday_tue)
+            txt_w1 = mk_text(3, wd.miercoles, holiday_wed)
+            txt_w2 = mk_text(4, wd.miercoles, holiday_wed)
             self.inputs[wd.semana] = (txt_mon, txt_tue, txt_w1, txt_w2)
 
     def _collect_entries(self) -> Dict[int, Tuple[str, str, str, str]]:
+        """Extrae los textos escritos por el usuario, omitiendo celdas bloqueadas por festivo."""
         out: Dict[int, Tuple[str, str, str, str]] = {}
         for semana, (m, t, w1, w2) in self.inputs.items():
             def get_text(txt: Any) -> str:
@@ -419,6 +559,7 @@ class CalendarGUI:
         return out
 
     def export_excel(self) -> None:
+        """Dialoga una ruta y genera el Excel usando build_excel()."""
         title = self.var_title.get().strip() or "Calendario de sesiones"
         subtitle = self.var_sub.get().strip()
         path = filedialog.asksaveasfilename(
@@ -429,12 +570,14 @@ class CalendarGUI:
         if not path:
             return
         try:
-            build_excel(path, title, subtitle, self.week_dates, self._collect_entries(), self.holidays)
+            exams = self._get_exam_dates()
+            build_excel(path, title, subtitle, self.week_dates, self._collect_entries(), self.holidays, exams)
             messagebox.showinfo("Listo", f"Archivo Excel generado:\n{path}")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo generar el Excel.\n{e}")
 
     def export_pdf(self) -> None:
+        """Dialoga una ruta y genera el PDF si reportlab está instalado."""
         title = self.var_title.get().strip() or "Calendario de sesiones"
         subtitle = self.var_sub.get().strip()
         path = filedialog.asksaveasfilename(
@@ -445,13 +588,15 @@ class CalendarGUI:
         if not path:
             return
         try:
-            build_pdf(path, title, subtitle, self.week_dates, self._collect_entries(), self.holidays)
+            exams = self._get_exam_dates()
+            build_pdf(path, title, subtitle, self.week_dates, self._collect_entries(), self.holidays, exams)
             messagebox.showinfo("Listo", f"Archivo PDF generado:\n{path}")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo generar el PDF.\n{e}")
 
 
 def run_gui() -> int:
+    """Punto de entrada de la GUI; devuelve código de salida (0=OK)."""
     if tk is None:
         print("tkinter no está disponible en este entorno.")
         return 2
@@ -462,7 +607,11 @@ def run_gui() -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    # For now, always launch GUI; future: add CLI flags
+    """Entrada principal del módulo.
+
+    Por ahora siempre abre la GUI. En el futuro se podría añadir CLI para
+    exportar directamente sin abrir ventana (p. ej. leyendo un JSON/CSV).
+    """
     return run_gui()
 
 

@@ -4,3 +4,5 @@ holidays>=0.57
 reportlab>=4.2.0
 # Optional for selector de fecha (GUI mejorada)
 tkcalendar>=1.6.1
+
+#para correr el programa: >>  python generar_calendario_gui.py
