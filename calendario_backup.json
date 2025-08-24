@@ -4,116 +4,123 @@
   "start_date": "2025-08-18",
   "weeks": 18,
   "exam_dates": [
-    "2025-08-18"
+    "2025-09-03",
+    "2025-09-17",
+    "2025-10-01",
+    "2025-10-15",
+    "2025-11-05",
+    "2025-11-19",
+    "2025-12-03",
+    "2025-12-17"
   ],
   "entries": {
     "1": [
       "",
-      "",
-      "",
-      ""
+      "Acuerdo Pedagógico",
+      "Sesion por confirmar",
+      "Introduccion a la biología celular: Origen de la vida"
     ],
     "2": [
-      "",
-      "",
-      "",
-      ""
+      "Introduccion a la biología celular: Origen de la vida",
+      "Biomoleculas, Agua y oligoelementos",
+      "Sesion por confirmar",
+      "Biomoléculas: Carbohidratos y Lipidos"
     ],
     "3": [
-      "",
-      "",
-      "",
-      ""
+      "Biomoléculas: Proteínas",
+      "Biomoléculas: Proteínas y Acidos nucléicos",
+      "Sesion por confirmar",
+      "Laboratorio 1: Introduccion a laboratorio, microscopía"
     ],
     "4": [
-      "",
-      "",
-      "",
-      ""
+      "Nucleo: componentes y funciones",
+      "Nucleo: Cromosomas - Flujo Informacion Genetica",
+      "Nucleo: Flujo Informacion Genetica",
+      "Laboratorio 2: Biomoléculas"
     ],
     "5": [
-      "",
-      "",
-      "",
-      ""
+      "Ciclo Celular",
+      "Ciclo Celular",
+      "Ciclo Celular",
+      "Laboratorio 3: Celula procariota"
     ],
     "6": [
-      "",
-      "",
-      "",
-      ""
+      "Sistema de endomembranas",
+      "Sistema de endomembranas",
+      "Sesion por confirmar",
+      "Laboratorio 4: Celula Eucariota"
     ],
     "7": [
-      "",
-      "",
-      "",
-      ""
+      "Membrana Celular",
+      "Membrana Celular",
+      "Membrana Celular- Señalizacion Celular",
+      "Laboratorio 5: Reproduccion"
     ],
     "8": [
-      "",
-      "",
-      "",
-      ""
+      "Señalizacion Celular",
+      "Señalizacion Celular",
+      "Sesion por confirmar",
+      "Señalizacion Celular- Apoptosis"
     ],
     "9": [
       "",
-      "",
-      "",
-      ""
+      "Apoptosis",
+      "Sistema de citoesqueleto",
+      "Sistema de citoesqueleto"
     ],
     "10": [
-      "",
-      "",
-      "",
-      ""
+      "Introduccion a la bioquimica",
+      "Introduccion a la bioquimica- Agua - pH",
+      "Sesion por confirmar",
+      "Laboratorio 6: pH"
     ],
     "11": [
-      "",
-      "",
-      "",
-      ""
+      "Taller de pH",
+      "Bioenergética",
+      "Bioenergética - Entropía",
+      "Laboratorio 7: Cinetica Enzimática"
     ],
     "12": [
       "",
-      "",
-      "",
-      ""
+      "Enzimología - Cinética Enzimática",
+      "Enzimología - Cinética Enzimática",
+      "Laboratorio 8: Hidrolisis enzimática"
     ],
     "13": [
-      "",
-      "",
-      "",
-      ""
+      "Metabolismo carbohidratos",
+      "Metabolismo carbohidratos: glicolisis",
+      "Sesion por confirmar",
+      "Metabolismo carbohidratos: gluconeogenesis"
     ],
     "14": [
       "",
-      "",
-      "",
-      ""
+      "Metabolismo carbohidratos: glucogeno - catabolismo y anabolismo",
+      "Sesion por confirmar",
+      "Metabolismo carbohidratos: ruta de las pentosas fosfato"
     ],
     "15": [
-      "",
-      "",
-      "",
-      ""
+      "Metabolismo de lipidos: introduccion",
+      "Metabolismo de lipidos: catabolismo",
+      "Metabolismo de lipidos: anabolismo",
+      "Metabolismo de lipidos: anabolismo"
     ],
     "16": [
-      "",
-      "",
-      "",
-      ""
+      "Ciclo de Krebs: acoplamiento",
+      "Ciclo de Krebs: Ruta",
+      "Ciclo de Krebs: Integración",
+      "Ciclo de Krebs: Integración"
     ],
     "17": [
       "",
-      "",
-      "",
-      ""
+      "Integracion metabólica",
+      "Integracion metabólica",
+      "Preparcion cierre"
     ],
     "18": [
-      "",
-      "",
-      "",
-      ""
+      "Preparcion cierre",
+      "Preparcion cierre",
+      "Sesion por confirmar",
+      "Entrega Notas, cierre del curso"
     ]
   }
 }

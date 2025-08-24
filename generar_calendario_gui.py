@@ -227,8 +227,8 @@ def build_excel(
             if is_holiday:
                 cell.value = f"Festivo: {holidays_map[d]}\nNo hay clase"
                 cell.fill = holiday_fill
-            elif d in exam_dates:
-                # Mark exams with yellow fill and optional text
+            elif col == 4 and d in exam_dates:
+                # Only mark exams for Wednesday Session 2 (2:00 pm - 5:00 pm)
                 cell.value = f"Examen" + (f"\n{txt}" if txt else "")
                 cell.fill = exam_fill
             else:
@@ -260,6 +260,17 @@ def build_pdf(
 
     doc = SimpleDocTemplate(out_path, pagesize=landscape(A4), rightMargin=18, leftMargin=18, topMargin=24, bottomMargin=24)
     styles = getSampleStyleSheet()
+    # Paragraph helpers for wrapping text within table cells
+    try:
+        from xml.sax.saxutils import escape as _xml_escape
+    except Exception:
+        _xml_escape = lambda s: s  # fallback, unlikely to be used
+
+    def P(text: str, bold: bool = False):
+        safe = _xml_escape(text or "").replace("\n", "<br/>")
+        if bold:
+            safe = f"<b>{safe}</b>"
+        return Paragraph(safe, styles["BodyText"])
     parts: List = []
     parts.append(Paragraph(title, styles["Title"]))
     parts.append(Paragraph(subtitle, styles["Normal"]))
@@ -269,37 +280,35 @@ def build_pdf(
         month_name = SPANISH_MONTHS[wd.lunes.month]
         parts.append(Paragraph(f"SEMANA {wd.semana} {month_name}", styles["Heading2"]))
 
-        data = [
-            [
-                f"Lunes {CLASS_TIMES['lunes']} {wd.lunes.strftime('%d/%m')}",
-                f"Martes {CLASS_TIMES['martes']} {wd.martes.strftime('%d/%m')}",
-                f"Miércoles 1 {CLASS_TIMES['miercoles_1']} {wd.miercoles.strftime('%d/%m')}",
-                f"Miércoles 2 {CLASS_TIMES['miercoles_2']} {wd.miercoles.strftime('%d/%m')}",
-            ]
-        ]
+        data = [[
+            P(f"Lunes {CLASS_TIMES['lunes']} {wd.lunes.strftime('%d/%m')}", bold=True),
+            P(f"Martes {CLASS_TIMES['martes']} {wd.martes.strftime('%d/%m')}", bold=True),
+            P(f"Miércoles 1 {CLASS_TIMES['miercoles_1']} {wd.miercoles.strftime('%d/%m')}", bold=True),
+            P(f"Miércoles 2 {CLASS_TIMES['miercoles_2']} {wd.miercoles.strftime('%d/%m')}", bold=True),
+        ]]
 
         mon_txt, tue_txt, wed1_txt, wed2_txt = entries.get(wd.semana, ("", "", "", ""))
 
-        def cell_text(d: date, txt: str) -> str:
+        def cell_text(d: date, txt: str, allow_exam: bool = False) -> str:
             if d in holidays_map:
                 return f"Festivo: {holidays_map[d]}\nNo hay clase"
-            if d in exam_dates:
+            if allow_exam and d in exam_dates:
                 return "Examen" + (f"\n{txt}" if txt else "")
-            return txt
+            return txt or ""
 
         data.append([
-            cell_text(wd.lunes, mon_txt),
-            cell_text(wd.martes, tue_txt),
-            cell_text(wd.miercoles, wed1_txt),
-            cell_text(wd.miercoles, wed2_txt),
+            P(cell_text(wd.lunes, mon_txt, allow_exam=False)),
+            P(cell_text(wd.martes, tue_txt, allow_exam=False)),
+            P(cell_text(wd.miercoles, wed1_txt, allow_exam=False)),
+            P(cell_text(wd.miercoles, wed2_txt, allow_exam=True)),
         ])
-
         t = Table(data, colWidths=[200, 200, 200, 200])
         t.setStyle(
             TableStyle([
                 ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
-                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("ALIGN", (0, 0), (-1, 0), "CENTER"),  # headers centered
+                ("ALIGN", (0, 1), (-1, -1), "LEFT"),    # body left-aligned
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
                 ("LEFTPADDING", (0, 0), (-1, -1), 6),
@@ -318,16 +327,9 @@ def build_pdf(
             # Light green for holidays
             t.setStyle(TableStyle([("BACKGROUND", (c, 1), (c, 1), colors.HexColor('#C6EFCE'))]))
 
-        exam_cols = []
-        if wd.lunes in exam_dates:
-            exam_cols.append(0)
-        if wd.martes in exam_dates:
-            exam_cols.append(1)
+        # Only highlight exam for Wednesday Session 2 (column index 3)
         if wd.miercoles in exam_dates:
-            exam_cols.extend([2, 3])
-        for c in exam_cols:
-            # Light orange for exams
-            t.setStyle(TableStyle([("BACKGROUND", (c, 1), (c, 1), colors.HexColor('#F8CBAD'))]))
+            t.setStyle(TableStyle([("BACKGROUND", (3, 1), (3, 1), colors.HexColor('#F8CBAD'))]))
 
         parts.append(t)
         parts.append(Spacer(1, 6))
@@ -428,6 +430,7 @@ class CalendarGUI:
         actions.pack(fill=tk.X, padx=10, pady=(0, 12))
         ttk.Button(actions, text="Exportar a Excel (.xlsx)", command=self.export_excel).pack(side=tk.LEFT)
         ttk.Button(actions, text="Exportar a PDF (.pdf)", command=self.export_pdf).pack(side=tk.LEFT, padx=10)
+        ttk.Button(actions, text="Guardar respaldo", command=self.manual_save_backup).pack(side=tk.LEFT)
 
         # Holidays notice
         self.info_label = ttk.Label(root, text=self._holidays_text())
@@ -436,6 +439,12 @@ class CalendarGUI:
         # Hook close event to save backup
         try:
             self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        except Exception:
+            pass
+
+        # Shortcut Ctrl+S to save backup
+        try:
+            self.root.bind("<Control-s>", self._on_save_shortcut)
         except Exception:
             pass
 
@@ -514,10 +523,7 @@ class CalendarGUI:
             child.destroy()
         self._build_weeks_ui()
         self.info_label.config(text=self._holidays_text())
-        # After rebuilding, re-apply saved entries if any
-        saved = self._read_backup_file()
-        if saved and isinstance(saved.get("entries"), dict):
-            self._apply_saved_entries(saved["entries"])
+    # Nota: no re-aplicamos entradas guardadas aquí para evitar duplicados.
 
     def _build_weeks_ui(self) -> None:
         """Construye la grilla de semanas sobre un único grid.
@@ -559,7 +565,8 @@ class CalendarGUI:
                     name = self.holidays.get(day, "Festivo")
                     t.insert("1.0", f"Festivo: {name}\nNo hay clase")
                     t.config(state=tk.DISABLED)
-                elif day in exams:
+                elif day in exams and col == 4:
+                    # Only mark exam in Wednesday Session 2 (2:00 pm - 5:00 pm)
                     t.insert("1.0", "Examen")
                 return t
 
@@ -576,7 +583,14 @@ class CalendarGUI:
             def get_text(txt: Any) -> str:
                 if str(txt["state"]) == "disabled":
                     return ""
-                return txt.get("1.0", "end").strip()
+                val = txt.get("1.0", "end").strip()
+                # Normalizar contenido: si empieza con 'Examen' quitar ese encabezado al guardar
+                if val.lower().startswith("examen"):
+                    lines = val.splitlines()
+                    if lines and lines[0].lower().startswith("examen"):
+                        rest = "\n".join(lines[1:]).strip()
+                        return rest
+                return val
 
             out[semana] = (get_text(m), get_text(t), get_text(w1), get_text(w2))
         return out
@@ -666,8 +680,18 @@ class CalendarGUI:
                 if str(t["state"]) == "disabled":
                     continue
                 cur = t.get("1.0", "end").strip()
+                # Reemplazar siempre el contenido para evitar acumulación.
                 if cur.startswith("Examen"):
-                    t.insert("end", ("\n" if txt else "") + txt)
+                    # Sanitizar el texto guardado: quitar encabezado 'Examen' si viene incluido
+                    safe_txt = (txt or "").strip()
+                    low = safe_txt.lower()
+                    if low.startswith("examen"):
+                        # Remover la primera línea si inicia con 'Examen'
+                        lines = safe_txt.splitlines()
+                        if lines and lines[0].lower().startswith("examen"):
+                            safe_txt = "\n".join(lines[1:]).strip()
+                    t.delete("1.0", "end")
+                    t.insert("1.0", "Examen" + ("\n" + safe_txt if safe_txt else ""))
                 else:
                     t.delete("1.0", "end")
                     t.insert("1.0", txt)
@@ -675,6 +699,9 @@ class CalendarGUI:
     def _load_backup(self) -> None:
         data = self._read_backup_file()
         if not data:
+            return
+        # Evitar aplicar múltiples veces en una sesión
+        if getattr(self, "_backup_loaded", False):
             return
         if isinstance(data.get("title"), str):
             self.var_title.set(data["title"])
@@ -715,6 +742,7 @@ class CalendarGUI:
         entries = data.get("entries")
         if isinstance(entries, dict):
             self._apply_saved_entries(entries)
+        self._backup_loaded = True
 
     def _on_close(self) -> None:
         self._save_backup()
@@ -722,6 +750,18 @@ class CalendarGUI:
             self.root.destroy()
         except Exception:
             pass
+
+    def manual_save_backup(self) -> None:
+        """Guarda el respaldo manualmente y notifica la ruta de guardado."""
+        try:
+            self._save_backup()
+            messagebox.showinfo("Respaldo", f"Respaldo guardado en:\n{self._backup_path()}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar el respaldo.\n{e}")
+
+    def _on_save_shortcut(self, event=None):
+        self.manual_save_backup()
+        return "break"
 
 
 def run_gui() -> int:
