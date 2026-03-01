@@ -4,9 +4,10 @@ Generador de calendario de clases (GUI)
 Resumen de arquitectura
 - Capa de datos:
     - WeekDates: estructura con las fechas de cada semana (Lun/Mar/Mié) y el número de semana.
-    - compute_weeks(): calcula 18 semanas (o N) a partir de un lunes de inicio.
+    - compute_weeks(): calcula 18 semanas (o N) a partir de un lunes de inicio,
+        omitiendo automáticamente la semana de Semana Santa.
     - get_colombia_holidays(): obtiene festivos en Colombia para el rango [inicio, fin]; usa la
-        librería "holidays" si está disponible, o un fallback mínimo para 2025.
+        librería "holidays" si está disponible, o un fallback interno para cualquier año.
 
 - Capa de exportación:
     - build_excel(): genera un archivo .xlsx con una tabla por semana (encabezado + 4 columnas).
@@ -59,30 +60,86 @@ try:
 except Exception:
     REPORTLAB_OK = False
 
-# Optional Holidays (for Colombia)
-def _fallback_colombia_holidays_2025() -> Dict[date, str]:
-    """Minimal fallback for 2025 Colombian holidays that affect Aug–Dec period.
+def _next_monday(d: date) -> date:
+    """Devuelve el lunes de la misma semana o el lunes siguiente."""
+    return d + timedelta(days=(7 - d.weekday()) % 7)
 
-    This covers Monday-observed holidays within the semester window.
-    """
-    return {
-        date(2025, 8, 18): "Asunción de la Virgen (festivo)",
-        date(2025, 10, 13): "Día de la Raza (festivo)",
-        date(2025, 11, 3): "Día de Todos los Santos (festivo)",
-        date(2025, 11, 17): "Independencia de Cartagena (festivo)",
-        date(2025, 12, 8): "Inmaculada Concepción (festivo)",
+
+def _easter_sunday(year: int) -> date:
+    """Calcula Domingo de Pascua (calendario gregoriano)."""
+    a = year % 19
+    b = year // 100
+    c = year % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    month = (h + l - 7 * m + 114) // 31
+    day = ((h + l - 7 * m + 114) % 31) + 1
+    return date(year, month, day)
+
+
+def _colombia_holidays_for_year(year: int) -> Dict[date, str]:
+    """Fallback de festivos oficiales de Colombia para un año."""
+    easter = _easter_sunday(year)
+    out: Dict[date, str] = {
+        # Fijos
+        date(year, 1, 1): "Año Nuevo",
+        date(year, 5, 1): "Día del Trabajo",
+        date(year, 7, 20): "Independencia de Colombia",
+        date(year, 8, 7): "Batalla de Boyacá",
+        date(year, 12, 8): "Inmaculada Concepción",
+        date(year, 12, 25): "Navidad",
+        # Relativos a Pascua (no trasladables)
+        easter - timedelta(days=3): "Jueves Santo",
+        easter - timedelta(days=2): "Viernes Santo",
     }
+
+    # Ley Emiliani (se trasladan al lunes siguiente)
+    emiliani = [
+        (date(year, 1, 6), "Reyes Magos"),
+        (date(year, 3, 19), "San José"),
+        (date(year, 6, 29), "San Pedro y San Pablo"),
+        (date(year, 8, 15), "Asunción de la Virgen"),
+        (date(year, 10, 12), "Día de la Raza"),
+        (date(year, 11, 1), "Día de Todos los Santos"),
+        (date(year, 11, 11), "Independencia de Cartagena"),
+    ]
+    for d, name in emiliani:
+        out[_next_monday(d)] = name
+
+    # Festivos religiosos trasladables
+    out[_next_monday(easter + timedelta(days=39))] = "Ascensión del Señor"
+    out[_next_monday(easter + timedelta(days=60))] = "Corpus Christi"
+    out[_next_monday(easter + timedelta(days=68))] = "Sagrado Corazón de Jesús"
+
+    return out
+
+
+def _is_holy_week_monday(monday_date: date) -> bool:
+    """Indica si el lunes dado corresponde al lunes de Semana Santa."""
+    if monday_date.weekday() != 0:
+        return False
+    easter = _easter_sunday(monday_date.year)
+    holy_monday = easter - timedelta(days=6)
+    return monday_date == holy_monday
 
 
 def get_colombia_holidays(start: date, end: date) -> Dict[date, str]:
     """Return a dict of holiday_date -> holiday_name for Colombia within range.
 
-    Tries the 'holidays' package; falls back to a minimal 2025 set.
+    Tries the 'holidays' package; falls back to internal Colombia rules.
     """
     try:
         import holidays  # type: ignore
 
-        co = holidays.country_holidays("CO", years={start.year, end.year})
+        years = set(range(start.year, end.year + 1))
+        co = holidays.country_holidays("CO", years=years)
         out: Dict[date, str] = {}
         d = start
         while d <= end:
@@ -91,8 +148,12 @@ def get_colombia_holidays(start: date, end: date) -> Dict[date, str]:
             d += timedelta(days=1)
         return out
     except Exception:
-        fallback = _fallback_colombia_holidays_2025()
-        return {k: v for k, v in fallback.items() if start <= k <= end}
+        out: Dict[date, str] = {}
+        for year in range(start.year, end.year + 1):
+            for d, name in _colombia_holidays_for_year(year).items():
+                if start <= d <= end:
+                    out[d] = name
+        return out
 
 
 SPANISH_MONTHS = {
@@ -126,13 +187,28 @@ def compute_weeks(start_monday: date, weeks: int = 18) -> List[WeekDates]:
 
     Retorna
     - Lista de WeekDates con (semana, lunes, martes, miércoles) por cada semana.
+    - Si una semana coincide con Semana Santa, se omite y se extiende el calendario
+      para conservar la cantidad total de semanas de clase.
     """
     if start_monday.weekday() != 0:
         raise ValueError("La fecha de inicio debe ser un lunes")
+
     out: List[WeekDates] = []
-    for i in range(weeks):
-        mon = start_monday + timedelta(weeks=i)
-        out.append(WeekDates(semana=i + 1, lunes=mon, martes=mon + timedelta(days=1), miercoles=mon + timedelta(days=2)))
+    mon = start_monday
+    while len(out) < weeks:
+        if _is_holy_week_monday(mon):
+            mon += timedelta(weeks=1)
+            continue
+        out.append(
+            WeekDates(
+                semana=len(out) + 1,
+                lunes=mon,
+                martes=mon + timedelta(days=1),
+                miercoles=mon + timedelta(days=2),
+            )
+        )
+        mon += timedelta(weeks=1)
+
     return out
 
 
@@ -390,6 +466,20 @@ class CalendarGUI:
         ttk.Spinbox(controls, from_=1, to=30, width=4, textvariable=self.var_weeks).grid(row=0, column=5, padx=(6, 12))
         ttk.Button(controls, text="Actualizar calendario", command=self.rebuild_calendar).grid(row=0, column=6)
 
+        # Auto-refresh holidays/calendar when start date changes
+        if TKCAL_OK:
+            try:
+                self.date_widget.bind("<<DateEntrySelected>>", self._on_start_date_selected)
+            except Exception:
+                pass
+        else:
+            try:
+                self._var_day.trace_add("write", self._on_start_date_selected)
+                self._var_month.trace_add("write", self._on_start_date_selected)
+                self._var_year.trace_add("write", self._on_start_date_selected)
+            except Exception:
+                pass
+
         # Exams input (8 dates)
         exams_frame = ttk.LabelFrame(root, text="Fechas de exámenes (8)")
         exams_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
@@ -491,7 +581,30 @@ class CalendarGUI:
         d = int(self._var_day.get())
         return date(y, m, d)
 
-    def rebuild_calendar(self) -> None:
+    def _generate_exam_dates(self, start_monday: date, count: int = 8, start_week: int = 4) -> List[date]:
+        """Genera fechas de exámenes en miércoles, quincenalmente, desde una semana base.
+
+        Por defecto: 8 fechas, iniciando en semana 4.
+        """
+        first_wednesday = start_monday + timedelta(weeks=start_week - 1, days=2)
+        return [first_wednesday + timedelta(weeks=2 * i) for i in range(count)]
+
+    def _set_exam_dates(self, exam_dates: List[date]) -> None:
+        """Escribe fechas de exámenes en los widgets del UI."""
+        for i, widget in enumerate(self.exam_inputs):
+            try:
+                d = exam_dates[i] if i < len(exam_dates) else None
+                if TKCAL_OK and hasattr(widget, 'set_date'):
+                    if d is not None:
+                        widget.set_date(d)
+                else:
+                    widget.delete(0, "end")
+                    if d is not None:
+                        widget.insert(0, d.strftime("%d/%m/%Y"))
+            except Exception:
+                continue
+
+    def rebuild_calendar(self, auto_generate_exams: bool = True, show_errors: bool = True) -> None:
         """Recalcula semanas y festivos cuando cambia inicio/semanas.
 
         Pasos:
@@ -503,7 +616,8 @@ class CalendarGUI:
         try:
             start = self._get_selected_start_date()
         except Exception as e:
-            messagebox.showerror("Fecha inválida", f"No se pudo leer la fecha: {e}")
+            if show_errors:
+                messagebox.showerror("Fecha inválida", f"No se pudo leer la fecha: {e}")
             return
         try:
             weeks = int(self.var_weeks.get())
@@ -511,7 +625,8 @@ class CalendarGUI:
             weeks = 18
 
         if start.weekday() != 0:
-            messagebox.showerror("Inicio inválido", "La fecha de inicio debe ser un Lunes.")
+            if show_errors:
+                messagebox.showerror("Inicio inválido", "La fecha de inicio debe ser un Lunes.")
             return
 
         self.start = start
@@ -520,12 +635,20 @@ class CalendarGUI:
         self.end = self.week_dates[-1].miercoles
         self.holidays = get_colombia_holidays(self.start, self.end)
 
+        if auto_generate_exams:
+            generated_exam_dates = self._generate_exam_dates(self.start, count=8, start_week=4)
+            self._set_exam_dates(generated_exam_dates)
+
         # Rebuild scroll area
         for child in self.scroll_frame.winfo_children():
             child.destroy()
         self._build_weeks_ui()
         self._apply_entries_from_backup()
         self.info_label.config(text=self._holidays_text())
+
+    def _on_start_date_selected(self, *args) -> None:
+        """Actualiza automáticamente festivos y grilla al cambiar fecha de inicio."""
+        self.rebuild_calendar(auto_generate_exams=True, show_errors=False)
 
     def _build_weeks_ui(self) -> None:
         """Construye la grilla de semanas sobre un único grid.
@@ -782,7 +905,7 @@ class CalendarGUI:
             except Exception:
                 continue
         # Rebuild now that inputs may have changed
-        self.rebuild_calendar()
+        self.rebuild_calendar(auto_generate_exams=False)
         self._backup_loaded = True
 
     def _on_close(self) -> None:
