@@ -431,6 +431,8 @@ class CalendarGUI:
         ttk.Button(actions, text="Exportar a Excel (.xlsx)", command=self.export_excel).pack(side=tk.LEFT)
         ttk.Button(actions, text="Exportar a PDF (.pdf)", command=self.export_pdf).pack(side=tk.LEFT, padx=10)
         ttk.Button(actions, text="Guardar respaldo", command=self.manual_save_backup).pack(side=tk.LEFT)
+        ttk.Button(actions, text="Cargar respaldo", command=self.manual_load_backup_entries).pack(side=tk.LEFT, padx=10)
+        ttk.Button(actions, text="Cargar respaldo desde...", command=self.manual_load_backup_from_file).pack(side=tk.LEFT)
 
         # Holidays notice
         self.info_label = ttk.Label(root, text=self._holidays_text())
@@ -522,8 +524,8 @@ class CalendarGUI:
         for child in self.scroll_frame.winfo_children():
             child.destroy()
         self._build_weeks_ui()
+        self._apply_entries_from_backup()
         self.info_label.config(text=self._holidays_text())
-    # Nota: no re-aplicamos entradas guardadas aquí para evitar duplicados.
 
     def _build_weeks_ui(self) -> None:
         """Construye la grilla de semanas sobre un único grid.
@@ -634,13 +636,32 @@ class CalendarGUI:
             messagebox.showerror("Error", f"No se pudo generar el PDF.\n{e}")
 
     # ---------- Backup persistence ----------
+    def _runtime_base_dir(self) -> str:
+        """Retorna el directorio base para archivos persistentes.
+
+        - En desarrollo: carpeta del script.
+        - En ejecutable PyInstaller (onefile/onedir): carpeta del .exe.
+        """
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(sys.executable)
+        return os.path.dirname(os.path.abspath(__file__))
+
     def _backup_path(self) -> str:
-        return os.path.join(os.path.dirname(__file__), "calendario_backup.json")
+        return os.path.join(self._runtime_base_dir(), "calendario_backup.json")
 
     def _read_backup_file(self) -> Optional[Dict[str, Any]]:
         try:
             path = self._backup_path()
             if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            return None
+        return None
+
+    def _read_backup_file_from(self, path: str) -> Optional[Dict[str, Any]]:
+        try:
+            if path and os.path.exists(path):
                 with open(path, "r", encoding="utf-8") as f:
                     return json.load(f)
         except Exception:
@@ -663,6 +684,29 @@ class CalendarGUI:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    def _get_backup_entries(self, path: Optional[str] = None) -> Dict[str, List[str]]:
+        """Lee y devuelve sólo el bloque 'entries' del respaldo, si existe."""
+        data = self._read_backup_file_from(path) if path else self._read_backup_file()
+        if not isinstance(data, dict):
+            return {}
+        raw_entries = data.get("entries")
+        if not isinstance(raw_entries, dict):
+            return {}
+
+        out: Dict[str, List[str]] = {}
+        for semana, values in raw_entries.items():
+            if isinstance(values, (list, tuple)):
+                out[str(semana)] = [str(v) if v is not None else "" for v in values[:4]]
+        return out
+
+    def _apply_entries_from_backup(self, path: Optional[str] = None) -> bool:
+        """Aplica entradas guardadas a la grilla actual. Retorna True si aplicó datos."""
+        saved_entries = self._get_backup_entries(path=path)
+        if not saved_entries:
+            return False
+        self._apply_saved_entries(saved_entries)
+        return True
 
     def _apply_saved_entries(self, saved: Dict[str, List[str]]) -> None:
         for semana, texts in saved.items():
@@ -739,9 +783,6 @@ class CalendarGUI:
                 continue
         # Rebuild now that inputs may have changed
         self.rebuild_calendar()
-        entries = data.get("entries")
-        if isinstance(entries, dict):
-            self._apply_saved_entries(entries)
         self._backup_loaded = True
 
     def _on_close(self) -> None:
@@ -758,6 +799,42 @@ class CalendarGUI:
             messagebox.showinfo("Respaldo", f"Respaldo guardado en:\n{self._backup_path()}")
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo guardar el respaldo.\n{e}")
+
+    def manual_load_backup_entries(self) -> None:
+        """Recarga manualmente las entradas de semanas desde el respaldo JSON."""
+        try:
+            loaded = self._apply_entries_from_backup()
+            if loaded:
+                messagebox.showinfo("Respaldo", f"Entradas cargadas desde:\n{self._backup_path()}")
+            else:
+                messagebox.showwarning(
+                    "Respaldo",
+                    f"No se encontraron entradas válidas en:\n{self._backup_path()}",
+                )
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar el respaldo.\n{e}")
+
+    def manual_load_backup_from_file(self) -> None:
+        """Permite escoger un JSON y cargar sus entradas en la grilla actual."""
+        path = filedialog.askopenfilename(
+            title="Seleccionar respaldo JSON",
+            initialdir=self._runtime_base_dir(),
+            filetypes=[("JSON", "*.json"), ("Todos los archivos", "*.*")],
+        )
+        if not path:
+            return
+
+        try:
+            loaded = self._apply_entries_from_backup(path=path)
+            if loaded:
+                messagebox.showinfo("Respaldo", f"Entradas cargadas desde:\n{path}")
+            else:
+                messagebox.showwarning(
+                    "Respaldo",
+                    f"No se encontraron entradas válidas en:\n{path}",
+                )
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cargar el respaldo.\n{e}")
 
     def _on_save_shortcut(self, event=None):
         self.manual_save_backup()
